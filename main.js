@@ -153,25 +153,9 @@ function isDemoName(name) {
 // extract normalized platform ('ps4'|'ps5'|null) from various item shapes
 function platformOf(item) {
   if (!item) return null;
-  // trophy entries use trophyTitlePlatform like "PS5"
-  if (item.trophyTitlePlatform) {
-    const t = String(item.trophyTitlePlatform).toLowerCase();
-    if (t.includes('ps5')) return 'ps5';
-    if (t.includes('ps4')) return 'ps4';
-  }
-  // purchased entries may have .platform as 'PS4'/'PS5'
-  if (item.platform) {
-    const t = String(item.platform).toLowerCase();
-    if (t.includes('ps5')) return 'ps5';
-    if (t.includes('ps4')) return 'ps4';
-  }
-  // played items may have category: 'ps5_native_game' or 'ps4_native_game'
-  if (item.category) {
-    const t = String(item.category).toLowerCase();
-    if (t.includes('ps5')) return 'ps5';
-    if (t.includes('ps4')) return 'ps4';
-  }
-  // fallback null
+  if (item.platform) return String(item.platform).toLowerCase().includes('ps5') ? 'ps5' : String(item.platform).toLowerCase().includes('ps4') ? 'ps4' : null;
+  if (item.trophyTitlePlatform) return String(item.trophyTitlePlatform).toLowerCase().includes('ps5') ? 'ps5' : String(item.trophyTitlePlatform).toLowerCase().includes('ps4') ? 'ps4' : null;
+  if (item.category) return String(item.category).toLowerCase().includes('ps5') ? 'ps5' : String(item.category).toLowerCase().includes('ps4') ? 'ps4' : null;
   return null;
 }
 
@@ -179,9 +163,8 @@ function platformOf(item) {
 function platformsCompatible(aItem, bItem) {
   const a = platformOf(aItem);
   const b = platformOf(bItem);
-  if (!a && !b) return true; // neither has platform info -> allow
-  if (a && b) return a === b; // both have -> must match
-  // only one side has platform info -> be conservative and require match only if the other explicitly contradicts (we'll treat unknown as compatible)
+  if (!a && !b) return true;
+  if (a && b) return a === b;
   return true;
 }
 
@@ -201,7 +184,9 @@ function mergeLibrary(purchased, titles, played) {
   const libMap = new Map(); // key -> merged entry
   const mergeLog = [];
 
-  // Step 1: seed with purchased
+  const libValues = () => Array.from(libMap.values());
+
+  // Step 1: purchased
   (purchased || []).forEach(p => {
     const key = p.titleId || p.npCommunicationId || p.productId || p.name;
     const entry = Object.assign({}, p);
@@ -209,34 +194,21 @@ function mergeLibrary(purchased, titles, played) {
     libMap.set(key, entry);
   });
 
-  // helper to convert map values to array for scanning
-  const libValues = () => Array.from(libMap.values());
-
-  // Step 2: merge titles (trophy lists)
+  // Step 2: titles
   (titles || []).forEach(t => {
-    // try strong id matches first
     const candidateIds = [t.npCommunicationId, t.titleId, t.productId].filter(Boolean);
     let existing = findByAnyId(libValues(), candidateIds);
 
-    // Try to match by titleId inside purchased/played concept lists if not found
     if (!existing && t.titleId) {
-      existing = libValues().find(v => {
-        // if v has concept and titleIds, see if t.titleId exists in it
-        const tv = v.concept && Array.isArray(v.concept.titleIds) && v.concept.titleIds.length
-          ? v.concept.titleIds.includes(t.titleId)
-          : false;
-        return tv;
-      });
+      existing = libValues().find(v => v.concept?.titleIds?.includes(t.titleId));
     }
 
-    // fallback: normalized name + platform + demo checks
     if (!existing) {
       const tNorm = normalize(t.trophyTitleName || t.titleName || t.name);
       const tIsDemo = isDemoName(t.trophyTitleName || t.titleName || t.name);
       existing = libValues().find(v => {
         const vNorm = normalize(v.name || v.titleName || v.trophyTitleName);
-        if (!vNorm) return false;
-        if (vNorm !== tNorm) return false;
+        if (!vNorm || vNorm !== tNorm) return false;
         if (isDemoName(v.name || v.titleName || v.trophyTitleName) !== tIsDemo) return false;
         if (!platformsCompatible(v, t)) return false;
         return true;
@@ -247,15 +219,14 @@ function mergeLibrary(purchased, titles, played) {
           existingName: existing.name,
           incomingName: t.trophyTitleName || t.titleName || t.name,
           existingKey: existing.titleId || existing.npCommunicationId || null,
-          incomingId: t.npCommunicationId || t.titleId || null
+          incomingId: t.npCommunicationId || t.titleId || null,
+          mergingFrom: TITLES_RAW,
+          mergingTo: existing.source?.includes('purchased') ? PURCHASED_RAW : existing.source?.includes('played') ? PLAYED_DISTILLED : 'unknown'
         });
       }
     }
 
-    // decide canonical key to use in map
     const key = existing?.titleId || t.npCommunicationId || t.titleId || t.trophyTitleName || t.titleName || t.name;
-
-    // build merged object
     const merged = Object.assign({}, existing || {}, {
       titleId: t.npCommunicationId || t.titleId || existing?.titleId,
       npCommunicationId: t.npCommunicationId || existing?.npCommunicationId,
@@ -266,21 +237,33 @@ function mergeLibrary(purchased, titles, played) {
       source: Array.from(new Set([...(existing?.source||[]), 'titles']))
     });
 
+    // set platform if missing
+    // if (!merged.platform && t.trophyTitlePlatform) merged.platform = platformOf(t);
+    // set platform if missing, and log it
+        if (!merged.platform && t.trophyTitlePlatform) {
+        merged.platform = platformOf(t);
+        mergeLog.push({
+            reason: 'auto-set platform from trophyTitlePlatform',
+            existingName: merged.name,
+            incomingName: t.trophyTitleName || t.titleName || t.name,
+            existingKey: merged.titleId || merged.npCommunicationId || null,
+            incomingId: t.npCommunicationId || t.titleId || null,
+            mergingFrom: TITLES_RAW,
+            mergingTo: existing?.source?.includes('purchased') ? PURCHASED_RAW : existing?.source?.includes('played') ? PLAYED_DISTILLED : 'unknown',
+            platformSetTo: merged.platform
+        });
+        }
+
+
     libMap.set(key, merged);
   });
 
-  // Step 3: merge played
+  // Step 3: played
   (played || []).forEach(p => {
-    // strong match: titleId
     let existing = null;
     if (p.titleId) existing = libValues().find(v => v.titleId === p.titleId || v.npCommunicationId === p.titleId || v.productId === p.titleId);
+    if (!existing && p.concept?.titleIds?.length) existing = findByAnyId(libValues(), p.concept.titleIds);
 
-    // try concept.titleIds (played's concept may list related titleIds)
-    if (!existing && p.concept && Array.isArray(p.concept.titleIds) && p.concept.titleIds.length) {
-      existing = findByAnyId(libValues(), p.concept.titleIds);
-    }
-
-    // try normalized name + platform + demo check
     if (!existing) {
       const pNorm = normalize(p.name || p.titleName || p.localizedName);
       const pIsDemo = isDemoName(p.name || p.titleName || p.localizedName);
@@ -297,15 +280,14 @@ function mergeLibrary(purchased, titles, played) {
           existingName: existing.name,
           incomingName: p.name,
           existingKey: existing.titleId || existing.npCommunicationId || null,
-          incomingId: p.titleId || null
+          incomingId: p.titleId || null,
+          mergingFrom: PLAYED_RAW,
+          mergingTo: existing.source?.includes('purchased') ? PURCHASED_RAW : existing.source?.includes('titles') ? TITLES_RAW : 'unknown'
         });
       }
     }
 
-    // canonical key
     const key = existing?.titleId || p.titleId || p.name || p.localizedName || p.titleName;
-
-    // merge fields (played should not wipe trophies)
     const merged = Object.assign({}, existing || {}, {
       titleId: p.titleId || existing?.titleId,
       name: p.name || p.localizedName || existing?.name || p.titleName,
@@ -322,12 +304,7 @@ function mergeLibrary(purchased, titles, played) {
     libMap.set(key, merged);
   });
 
-  // write merge log (only non-empty entries)
-  try {
-    fs.writeFileSync(MERGE_LOG, JSON.stringify(mergeLog || [], null, 2), 'utf8');
-  } catch (e) {
-    appendStatus('Failed to write merge log: ' + e.message);
-  }
+  try { fs.writeFileSync(MERGE_LOG, JSON.stringify(mergeLog || [], null, 2), 'utf8'); } catch(e){ appendStatus('Failed to write merge log: '+e.message); }
 
   return Array.from(libMap.values());
 }
@@ -351,7 +328,6 @@ ipcMain.handle('fetch-full-library', async () => {
       return;
     }
 
-    // --- Purchased games ---
     appendStatus('Fetching purchased games...');
     try { fs.unlinkSync(path.join(process.cwd(), PURCHASED_RAW)); } catch(e){}
     let totalFetched = 0;
@@ -374,16 +350,13 @@ ipcMain.handle('fetch-full-library', async () => {
       cursor = (cursor || 0) + 100;
       await new Promise(r => setTimeout(r, 200));
     }
-
     appendStatus(`Purchased fetch complete. Total items: ${totalFetched}`);
 
-    // --- Titles ---
     appendStatus('Fetching user titles...');
     const { trophyTitles } = await psn.getUserTitles(tokens, accountId);
     writeRaw(TITLES_RAW, trophyTitles || []);
     appendStatus(`Titles saved: ${trophyTitles.length}`);
 
-    // --- Played ---
     appendStatus('Fetching played games...');
     const rawPlayedResp = await psn.getUserPlayedGames(tokens, accountId);
     writeRaw(PLAYED_RAW, rawPlayedResp);
@@ -391,14 +364,12 @@ ipcMain.handle('fetch-full-library', async () => {
     writeRaw(PLAYED_DISTILLED, distilledPlayed);
     appendStatus(`Played games fetched: ${distilledPlayed.length}`);
 
-    // --- Merge ---
     appendStatus('Merging library...');
     const fullLibrary = mergeLibrary(purchasedAll, trophyTitles, distilledPlayed);
     writeRaw(FULL_LIBRARY, fullLibrary);
     appendStatus(`Full library saved: ${fullLibrary.length} entries`);
 
     return fullLibrary;
-
   } catch (err) {
     appendStatus('Fetch full library failed: ' + (err.message || String(err)));
   }
