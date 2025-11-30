@@ -14,6 +14,7 @@
   "dependencies": {
     "http-mitm-proxy": "^1.1.0",
     "node-fetch": "^2.7.0",
-    "psn-api": "^2.16.0"
+    "psn-api": "^2.16.0",
+    "steamgriddb": "^2.2.1"
   }
 }
