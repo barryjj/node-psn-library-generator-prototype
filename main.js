@@ -1,25 +1,23 @@
-// main.js - PSN POC with persistent token storage, refresh, distilled played games, debug purchased fetch, and merged full library
-// Saves config & raw responses to project root (process.cwd())
-
 const { app, BrowserWindow, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const psn = require('psn-api');
 
+// --- File Constants ---
 const CONFIG_NAME = 'psn_config.json';
 const PROFILE_RAW = 'profile_data_raw.json';
 const PLAYED_RAW = 'get_user_played_raw.json';
-const PLAYED_DISTILLED = 'get_user_played.json';
 const PURCHASED_RAW = 'get_purchased_raw.json';
 const TITLES_RAW = 'get_user_titles_raw.json';
 const FULL_LIBRARY = 'full_library.json';
 const MERGE_LOG = 'merge_log.json';
 
 let mainWindow;
-let configPath = path.join(process.cwd(), CONFIG_NAME);
-let stored = { username: null, tokens: null }; // in-memory
+const configPath = path.join(process.cwd(), CONFIG_NAME);
+let stored = { username: null, tokens: null }; // In-memory cache of config
 
-// Helpers
+// --- I/O Helpers ---
+
 function appendStatus(text) {
   if (mainWindow && mainWindow.webContents) {
     mainWindow.webContents.send('status-update', text);
@@ -52,40 +50,24 @@ function writeRaw(filename, data) {
   }
 }
 
-function appendPurchasedPage(page) {
-  const p = path.join(process.cwd(), PURCHASED_RAW);
-  let cur = [];
-  try {
-    if (fs.existsSync(p)) cur = JSON.parse(fs.readFileSync(p, 'utf8')) || [];
-  } catch (e) {
-    appendStatus('Warning: failed to read existing purchased file, overwriting.');
-    cur = [];
-  }
-  cur = cur.concat(page);
-  try {
-    fs.writeFileSync(p, JSON.stringify(cur, null, 2), 'utf8');
-  } catch (e) {
-    appendStatus('Failed to append purchased page: ' + e.message);
-  }
-}
+// --- Token Helpers ---
 
-// token helpers
-function tokenExpiresAt(tokens) {
-  if (!tokens || !tokens.lastFetched || !tokens.expiresIn) return 0;
+function getAccessExpiresAt(tokens) {
+  if (!tokens?.lastFetched || !tokens?.expiresIn) return 0;
   return tokens.lastFetched + tokens.expiresIn * 1000;
 }
-function refreshExpiresAt(tokens) {
-  if (!tokens || !tokens.lastFetched || !tokens.refreshTokenExpiresIn) return 0;
+function getRefreshExpiresAt(tokens) {
+  if (!tokens?.lastFetched || !tokens?.refreshTokenExpiresIn) return 0;
   return tokens.lastFetched + tokens.refreshTokenExpiresIn * 1000;
 }
 function isAccessExpired(tokens) {
-  return Date.now() >= tokenExpiresAt(tokens);
+  return Date.now() >= getAccessExpiresAt(tokens);
 }
 function isRefreshExpired(tokens) {
-  return Date.now() >= refreshExpiresAt(tokens);
+  return Date.now() >= getRefreshExpiresAt(tokens);
 }
 
-// refresh tokens using psn-api
+// Refresh tokens using psn-api
 async function refreshTokensIfNeeded(tokens) {
   if (!tokens) throw new Error('No tokens to refresh.');
   if (!isAccessExpired(tokens)) return tokens;
@@ -106,45 +88,19 @@ async function refreshTokensIfNeeded(tokens) {
   }
 }
 
-// distill user played games
-function distillPlayedGames(rawGames) {
-  return (rawGames || []).map((g) => {
-    const concept = g.concept || {};
-    const mediaImages = (concept.media?.images || []).reduce((acc, img) => {
-      if (img.type === 'GAMEHUB_COVER_ART') acc.cover = img.url;
-      else if (img.type === 'MASTER') acc.master = img.url;
-      else if (img.type === 'HERO_CHARACTER') acc.hero = img.url;
-      return acc;
+// Helper to extract relevant image URLs from a concept object
+function extractMediaImages(concept) {
+    return (concept?.media?.images || []).reduce((acc, img) => {
+        if (img.type === 'GAMEHUB_COVER_ART') acc.cover = img.url;
+        else if (img.type === 'MASTER') acc.master = img.url;
+        else if (img.type === 'HERO_CHARACTER') acc.hero = img.url;
+        return acc;
     }, {});
-    return {
-      titleId: g.titleId,
-      conceptId: concept.id,
-      name: g.name,
-      category: g.category,
-      genres: concept.genres || [],
-      images: mediaImages,
-      playCount: g.playCount,
-      firstPlayed: g.firstPlayedDateTime,
-      lastPlayed: g.lastPlayedDateTime,
-      playDuration: g.playDuration
-    };
-  });
 }
 
-// ------------------ MERGE HELPERS & MERGE FUNCTION ------------------
+// --- MERGE HELPERS & CORE MERGE FUNCTION ---
 
-// normalize a name string for loose matching
-// function normalize(name) {
-//   if (!name) return '';
-//   return String(name)
-//     .replace(/\(TM\)|™|®/gi, '')      // strip trademarks
-//     .replace(/\b(edition|remastered|definitive|complete|ultimate)\b/gi, '') // common suffix noise
-//     .replace(/[^a-z0-9]+/gi, '')      // remove non-alphanum
-//     .toLowerCase()
-//     .trim();
-// }
-
-// Normalize a name string for merging
+// Normalize a name string for merging (ID-less lookup)
 function normalizedName(name) {
   if (!name) return '';
   return String(name)
@@ -154,7 +110,7 @@ function normalizedName(name) {
     .trim();
 }
 
-// Display-friendly name (for UI and searches)
+// Display-friendly name
 function displayName(name) {
   if (!name) return '';
   return String(name)
@@ -169,50 +125,40 @@ function normalizePlatformCasing(platform) {
     return platform;
 }
 
-// --- ADJUSTED DEMO FILTERING FUNCTION ---
-// Detects demo/beta/trial versions based on name or the specific ID patterns (including the ...DEMO00000 case).
+// Detects demo/beta/trial versions based on name or the specific ID patterns.
 function isDemoGame(entry) {
   if (!entry) return false;
 
   const name = entry.name || entry.trophyTitleName || entry.titleName || '';
   const lcName = name.toLowerCase();
 
-  // Check name for demo, beta, or trial version (using word boundaries)
-  if (/\b(demo|beta|trial version)\b/i.test(lcName)) {
-      console.debug(`[DEMO FILTER] Name match found for: ${name}`);
-      return true;
-  }
+  if (/\b(demo|beta|trial version)\b/i.test(lcName)) return true;
 
-  // Check productId or entitlementId for DEMO patterns:
-  // 1. DEMO followed by digits (DEMO00000)
-  // 2. The word DEMO at the end of the ID string (MEMORYRETAILDEMO)
   const pid = entry.productId || '';
   const eid = entry.entitlementId || '';
 
-  if (/(DEMO\d+|DEMO)$/i.test(pid) || /(DEMO\d+|DEMO)$/i.test(eid)) {
-      console.debug(`[DEMO FILTER] ID pattern match found in: ${pid || eid}`);
-      return true;
-  }
+  if (/(DEMO\d+|DEMO)$/i.test(pid) || /(DEMO\d+|DEMO)$/i.test(eid)) return true;
 
   return false;
 }
 
-// extract normalized platform ('ps4'|'ps5'|null) from various item shapes
+// Extract lowercase 'ps4' or 'ps5' from item for compatibility check
 function platformOf(item) {
   if (!item) return null;
-  if (item.platform) return String(item.platform).toLowerCase().includes('ps5') ? 'ps5' : String(item.platform).toLowerCase().includes('ps4') ? 'ps4' : null;
-  if (item.trophyTitlePlatform) return String(item.trophyTitlePlatform).toLowerCase().includes('ps5') ? 'ps5' : String(item.trophyTitlePlatform).toLowerCase().includes('ps4') ? 'ps4' : null;
-  if (item.category) return String(item.category).toLowerCase().includes('ps5') ? 'ps5' : String(item.category).toLowerCase().includes('ps4') ? 'ps4' : null;
+  const p = item.platform || item.trophyTitlePlatform || item.category;
+  if (!p) return null;
+  const lcP = String(p).toLowerCase();
+  if (lcP.includes('ps5')) return 'ps5';
+  if (lcP.includes('ps4')) return 'ps4';
   return null;
 }
 
-// require platforms to be compatible before a name-based merge if either side has platform info
+// require platforms to be compatible before a name-based merge
 function platformsCompatible(aItem, bItem) {
   const a = platformOf(aItem);
   const b = platformOf(bItem);
-  if (!a && !b) return true;
-  if (a && b) return a === b;
-  return true;
+  if (!a || !b) return true; // Allows merge if one or both lacks platform info
+  return a === b;
 }
 
 // Try to find an existing map entry by scanning through lib values matching any of the ids in idList
@@ -220,45 +166,41 @@ function findByAnyId(libValues, idList) {
   if (!Array.isArray(idList) || idList.length === 0) return null;
   for (const id of idList) {
     if (!id) continue;
-    const found = libValues.find(v => v && (v.titleId === id || v.npCommunicationId === id || v.productId === id));
+    // Tighter ID matching logic using nullish coalescing for safety
+    const found = libValues.find(v => v?.titleId === id || v?.npCommunicationId === id || v?.productId === id);
     if (found) return found;
   }
   return null;
 }
 
-// Core merge: id-first, concept/titleIds-aware, then name+platform+demo fallback. Logs fallback merges.
-// --- CORE MERGE FUNCTION WITH PRE-FILTERING ---
+// Core merge: id-first, concept/titleIds-aware, then name+platform+demo fallback.
 function mergeLibrary(purchased, titles, played) {
-  const mergeLog = [];
+  const libMap = new Map();
+  const libValues = () => Array.from(libMap.values());
 
   // **STAGE 1: PRE-FILTERING DEMOS**
   const filteredPurchased = (purchased || []).filter(p => !isDemoGame(p));
   const filteredTitles = (titles || []).filter(t => !isDemoGame(t));
   const filteredPlayed = (played || []).filter(p => !isDemoGame(p));
 
-  // Logging using console.error for visibility
-  console.error(`[FILTER STATS] Removed ${purchased.length - filteredPurchased.length} Purchased Demos.`);
-  console.error(`[FILTER STATS] Removed ${titles.length - filteredTitles.length} Titles Demos.`);
-  console.error(`[FILTER STATS] Removed ${played.length - filteredPlayed.length} Played Demos.`);
-
-  const libMap = new Map(); // key -> merged entry
-
-  const libValues = () => Array.from(libMap.values());
+  console.log(`[FILTER STATS] Removed ${purchased.length - filteredPurchased.length} Purchased Demos.`);
+  console.log(`[FILTER STATS] Removed ${titles.length - filteredTitles.length} Titles Demos.`);
+  console.log(`[FILTER STATS] Removed ${played.length - filteredPlayed.length} Played Demos.`);
 
   // Step 1: purchased (Sets the reliable foundation)
   filteredPurchased.forEach(p => {
     const key = p.titleId || p.npCommunicationId || p.productId || p.name;
-    const entry = Object.assign({}, p);
-    entry.source = Array.from(new Set([...(entry.source || []), 'purchased']));
+    
+    // Modernized Object Creation
+    const entry = {
+        ...p,
+        source: Array.from(new Set([...(p.source || []), 'purchased'])),
+        normalizedName: normalizedName(p.name),
+        displayName: displayName(p.name),
+        // Platform normalization applied immediately
+        platform: normalizePlatformCasing(p.platform),
+    };
 
-    entry.normalizedName = normalizedName(entry.name);
-    entry.displayName = displayName(entry.name);
-    
-    // **APPLY NORMALIZATION HERE**
-    if (entry.platform) {
-        entry.platform = normalizePlatformCasing(entry.platform);
-    }
-    
     libMap.set(key, entry);
   });
 
@@ -278,34 +220,32 @@ function mergeLibrary(purchased, titles, played) {
 
       existing = currentLibValuesForTitles.find(v => {
         const vNorm = normalizedName(v.name || v.titleName || v.trophyTitleName);
-        if (!vNorm || vNorm !== tNorm) return false;
-        if (!platformsCompatible(v, t)) return false;
-        return true;
+        if (vNorm && vNorm === tNorm && platformsCompatible(v, t)) return true;
+        return false;
       });
     }
 
     const key = existing?.titleId || existing?.npCommunicationId || t.npCommunicationId || t.titleId || t.trophyTitleName || t.titleName || t.name;
 
-    const merged = Object.assign({}, existing || {}, {
-      titleId: existing?.titleId || t.titleId,
-      npCommunicationId: existing?.npCommunicationId || t.npCommunicationId,
-      productId: existing?.productId || t.productId,
-
-      name: t.trophyTitleName || existing?.name || t.titleName || t.name,
-      trophies: t.definedTrophies || existing?.trophies,
-      trophyProgress: (t.progress != null) ? t.progress : existing?.trophyProgress,
-      images: Object.assign({}, existing?.images || {}, { cover: existing?.images?.cover || t.trophyTitleIconUrl || null }),
-      source: Array.from(new Set([...(existing?.source || []), 'titles']))
-    });
-
-    // **APPLY NORMALIZATION HERE**
-    if (t.trophyTitlePlatform) {
-        merged.platform = normalizePlatformCasing(t.trophyTitlePlatform);
-    } else if (existing?.platform) {
-        merged.platform = normalizePlatformCasing(existing.platform);
-    } else if (merged.platform) {
-        merged.platform = normalizePlatformCasing(merged.platform);
-    }
+    // Modernized Object Merging with spread syntax
+    const merged = {
+        ...(existing || {}),
+        titleId: existing?.titleId || t.titleId,
+        npCommunicationId: existing?.npCommunicationId || t.npCommunicationId,
+        productId: existing?.productId || t.productId,
+        name: t.trophyTitleName || existing?.name || t.titleName || t.name,
+        trophies: t.definedTrophies || existing?.trophies,
+        trophyProgress: (t.progress != null) ? t.progress : existing?.trophyProgress,
+        
+        images: {
+            ...(existing?.images || {}), 
+            cover: existing?.images?.cover || t.trophyTitleIconUrl || null 
+        },
+        
+        source: Array.from(new Set([...(existing?.source || []), 'titles'])),
+        
+        platform: normalizePlatformCasing(t.trophyTitlePlatform || existing?.platform)
+    };
     
     merged.normalizedName = normalizedName(merged.name);
     merged.displayName = displayName(merged.name);
@@ -327,50 +267,42 @@ function mergeLibrary(purchased, titles, played) {
 
       existing = currentLibValuesForPlayed.find(v => {
         const vNorm = normalizedName(v.name || v.titleName || v.trophyTitleName);
-        if (!vNorm || vNorm !== pNorm) return false;
-        if (!platformsCompatible(v, p)) return false;
-        return true;
+        if (vNorm && vNorm === pNorm && platformsCompatible(v, p)) return true;
+        return false;
       });
     }
 
     const key = existing?.titleId || existing?.npCommunicationId || p.titleId || p.name || p.localizedName || p.titleName;
 
-    const playedImages = (p.images && (p.images.cover || p.images.master || p.images.hero))
-      || (p.concept?.media?.images || []).reduce((acc, img) => {
-        if (img.type === 'GAMEHUB_COVER_ART') acc.cover = img.url;
-        else if (img.type === 'MASTER') acc.master = img.url;
-        else if (img.type === 'HERO_CHARACTER') acc.hero = img.url;
-        return acc;
-      }, {});
+    const playedImages = extractMediaImages(p.concept);
 
-    const merged = Object.assign({}, existing || {}, {
-      titleId: existing?.titleId || p.titleId,
-      npCommunicationId: existing?.npCommunicationId || p.npCommunicationId,
-      productId: existing?.productId || p.productId,
+    // Modernized Object Merging
+    const merged = {
+        ...(existing || {}),
+        titleId: existing?.titleId || p.titleId,
+        npCommunicationId: existing?.npCommunicationId || p.npCommunicationId,
+        productId: existing?.productId || p.productId,
 
-      name: p.name || p.localizedName || existing?.name || p.titleName,
-      playCount: (p.playCount != null) ? p.playCount : existing?.playCount || 0,
-      firstPlayed: p.firstPlayed || p.firstPlayedDateTime || existing?.firstPlayed,
-      lastPlayed: p.lastPlayed || p.lastPlayedDateTime || existing?.lastPlayed,
-      playDuration: p.playDuration || existing?.playDuration,
+        name: p.name || p.localizedName || existing?.name || p.titleName,
+        playCount: (p.playCount != null) ? p.playCount : existing?.playCount || 0,
+        firstPlayed: p.firstPlayed || p.firstPlayedDateTime || existing?.firstPlayed,
+        lastPlayed: p.lastPlayed || p.lastPlayedDateTime || existing?.lastPlayed,
+        playDuration: p.playDuration || existing?.playDuration,
 
-      images: Object.assign({}, existing?.images || {}, playedImages, {
-          cover: existing?.images?.cover || playedImages.cover
-      }),
+        images: {
+            ...(existing?.images || {}), 
+            ...playedImages,
+            // Ensure existing cover takes precedence
+            cover: existing?.images?.cover || playedImages.cover
+        },
 
-      trophies: existing?.trophies || null,
-      trophyProgress: existing?.trophyProgress || null,
-      source: Array.from(new Set([...(existing?.source || []), 'played']))
-    });
-
-    // **APPLY NORMALIZATION HERE**
-    if (p.platform) {
-        merged.platform = normalizePlatformCasing(p.platform);
-    } else if (existing?.platform) {
-        merged.platform = normalizePlatformCasing(existing.platform);
-    } else if (merged.platform) {
-        merged.platform = normalizePlatformCasing(merged.platform);
-    }
+        trophies: existing?.trophies || null,
+        trophyProgress: existing?.trophyProgress || null,
+        source: Array.from(new Set([...(existing?.source || []), 'played'])),
+        
+        // Streamlined Platform Assignment
+        platform: normalizePlatformCasing(p.platform || existing?.platform)
+    };
 
     merged.normalizedName = normalizedName(merged.name);
     merged.displayName = displayName(merged.name);
@@ -378,16 +310,10 @@ function mergeLibrary(purchased, titles, played) {
     libMap.set(key, merged);
   });
   
-  // FINAL CLEANUP: Ensure all platforms in the final list are standardized
-  return Array.from(libMap.values()).map(item => {
-      if (item.platform) {
-          item.platform = normalizePlatformCasing(item.platform);
-      }
-      return item;
-  });
+  return Array.from(libMap.values());
 }
 
-// ------------------ END MERGE HELPERS & MERGE FUNCTION ------------------
+// --- END MERGE HELPERS & CORE MERGE FUNCTION ---
 
 // fetch full library
 ipcMain.handle('fetch-full-library', async () => {
@@ -407,10 +333,10 @@ ipcMain.handle('fetch-full-library', async () => {
     }
 
     appendStatus('Fetching purchased games...');
-    try { fs.unlinkSync(path.join(process.cwd(), PURCHASED_RAW)); } catch(e){}
+    const purchasedAll = [];
     let totalFetched = 0;
     let cursor = null;
-    const purchasedAll = [];
+
     while (true) {
       const resp = await psn.getPurchasedGames(tokens, {
         platform: ['ps4','ps5'],
@@ -420,14 +346,19 @@ ipcMain.handle('fetch-full-library', async () => {
       });
       const gameList = resp?.data?.purchasedTitlesRetrieve;
       if (!gameList || !gameList.games?.length) break;
-      appendPurchasedPage(gameList.games);
+      
+      // *** Streamlined: collect pages in memory ***
       purchasedAll.push(...gameList.games);
+      
       totalFetched += gameList.games.length;
       appendStatus(`Purchased batch: ${gameList.games.length} items (total ${totalFetched})`);
       if (gameList.games.length < 100) break;
       cursor = (cursor || 0) + 100;
       await new Promise(r => setTimeout(r, 200));
     }
+    
+    // *** Streamlined: write purchased data once ***
+    writeRaw(PURCHASED_RAW, purchasedAll);
     appendStatus(`Purchased fetch complete. Total items: ${totalFetched}`);
 
     appendStatus('Fetching user titles...');
@@ -438,7 +369,7 @@ ipcMain.handle('fetch-full-library', async () => {
     appendStatus('Fetching played games...');
     const playedGamesResponse = await psn.getUserPlayedGames(tokens, accountId);
     writeRaw(PLAYED_RAW, playedGamesResponse);
-    // normalize to an array for merging
+    
     const playedGames = Array.isArray(playedGamesResponse)
                         ? playedGamesResponse
                         : (playedGamesResponse.titles || playedGamesResponse.items || []);
@@ -465,8 +396,8 @@ function buildHtml(config) {
     const t = config.tokens;
     const atk = t.accessToken || '';
     const rtk = t.refreshToken || '';
-    const atExpStr = t.lastFetched ? new Date(tokenExpiresAt(t)).toString() : 'unknown';
-    const rtExpStr = t.lastFetched ? new Date(refreshExpiresAt(t)).toString() : 'unknown';
+    const atExpStr = t.lastFetched ? new Date(getAccessExpiresAt(t)).toString() : 'unknown';
+    const rtExpStr = t.lastFetched ? new Date(getRefreshExpiresAt(t)).toString() : 'unknown';
     tokenBlock = `
       <h3>Stored Token Info</h3>
       <label>Username: <input id="username_stored" value="${usernameVal}" disabled style="width:300px"/></label><br/><br/>
