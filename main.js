@@ -101,9 +101,40 @@ function extractMediaImages(concept) {
 // --- MERGE HELPERS & CORE MERGE FUNCTION ---
 
 // Normalize a name string for merging (ID-less lookup)
+// Normalize a name string for merging (ID-less lookup)
 function normalizedName(name) {
   if (!name) return '';
-  return String(name)
+
+  let tempName = String(name).toUpperCase();
+
+  // 1. Roman Numeral Conversion (Longest match first, using \b word boundary for safety)
+  // This converts common Roman numeral suffixes up to XX (20) to Arabic numerals
+  // for consistent normalization. We use word boundaries (\b) to ensure we only
+  // target standalone numerals.
+  tempName = tempName
+    .replace(/\bXX\b/g, '20')
+    .replace(/\bXIX\b/g, '19')
+    .replace(/\bXVIII\b/g, '18')
+    .replace(/\bXVII\b/g, '17')
+    .replace(/\bXVI\b/g, '16')
+    .replace(/\bXV\b/g, '15')
+    .replace(/\bXIV\b/g, '14')
+    .replace(/\bXIII\b/g, '13')
+    .replace(/\bXII\b/g, '12')
+    .replace(/\bXI\b/g, '11')
+    .replace(/\bX\b/g, '10')
+    .replace(/\bIX\b/g, '9')
+    .replace(/\bVIII\b/g, '8')
+    .replace(/\bVII\b/g, '7')
+    .replace(/\bVI\b/g, '6')
+    .replace(/\bV\b/g, '5')
+    .replace(/\bIV\b/g, '4')
+    .replace(/\bIII\b/g, '3')
+    .replace(/\bII\b/g, '2')
+    .replace(/\bI\b/g, '1');
+
+  // 2. Existing Normalization
+  return tempName
     .replace(/\(TM\)|™|®/gi, '')      // strip trademarks
     .replace(/[^a-z0-9]+/gi, '')      // remove non-alphanum
     .toLowerCase()
@@ -132,7 +163,7 @@ function isDemoGame(entry) {
   const name = entry.name || entry.trophyTitleName || entry.titleName || '';
   const lcName = name.toLowerCase();
 
-  if (/\b(demo|beta|trial version)\b/i.test(lcName)) return true;
+  if (/\b(demo|beta|trial version|trial edition)\b/i.test(lcName)) return true;
 
   const pid = entry.productId || '';
   const eid = entry.entitlementId || '';

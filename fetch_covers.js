@@ -15,17 +15,6 @@ const FULL_LIBRARY_JSON = path.join(__dirname, 'full_library.json');
 const OUTPUT_JSON = path.join(__dirname, 'full_library_images.json');
 const OUTPUT_HTML = path.join(__dirname, 'full_library_images.html');
 
-// ---------------- HELPERS ----------------
-function normalize(name) {
-  if (!name) return '';
-  return String(name)
-    .replace(/\(TM\)|™|®/gi, '')
-    .replace(/\b(edition|remastered|definitive|complete|ultimate)\b/gi, '')
-    .replace(/[^a-z0-9]+/gi, '')
-    .toLowerCase()
-    .trim();
-}
-
 // ---------------- MAIN ----------------
 (async function () {
   if (!fs.existsSync(FULL_LIBRARY_JSON)) {
@@ -38,14 +27,13 @@ function normalize(name) {
   const libraryWithImages = [];
 
   for (const game of fullLibrary) {
-    const normName = normalize(game.name);
     let gridUrl = '';
     let wideGridUrl = '';
     let steamGridDbId = null;
 
     try {
       // Step 1: search for the game
-      const searchResults = await client.searchGame(game.name);
+      const searchResults = await client.searchGame(game.displayName);
       if (searchResults && searchResults.length > 0) {
         const bestMatch = searchResults[0]; // take the first match
         steamGridDbId = bestMatch.id;
@@ -70,7 +58,6 @@ function normalize(name) {
     }
 
     libraryWithImages.push(Object.assign({}, game, {
-      normalizedName: normName,
       gridUrl,
       wideGridUrl,
       steamGridDbId
