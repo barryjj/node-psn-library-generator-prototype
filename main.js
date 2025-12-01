@@ -161,14 +161,15 @@ function isNonGame(entry) {
   if (!entry) return false;
 
   const name = entry.name || entry.trophyTitleName || entry.titleName || '';
-  const lcName = name.toLowerCase();
 
-  if (/\b(demo|beta|trial version|trial edition|art of|soundtrack)\b/i.test(lcName)) return true;
+  if (/\b(demo|beta|trial version|trial edition|art of|soundtrack)\b/i.test(name)) return true;
 
   const pid = entry.productId || '';
   const eid = entry.entitlementId || '';
 
   if (/(DEMO\d+|DEMO)$/i.test(pid) || /(DEMO\d+|DEMO)$/i.test(eid)) return true;
+
+  if (/BETA/i.test(pid) || /BETA/i.test(eid)) return true;
 
   return false;
 }
