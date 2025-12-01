@@ -157,13 +157,13 @@ function normalizePlatformCasing(platform) {
 }
 
 // Detects demo/beta/trial versions based on name or the specific ID patterns.
-function isDemoGame(entry) {
+function isNonGame(entry) {
   if (!entry) return false;
 
   const name = entry.name || entry.trophyTitleName || entry.titleName || '';
   const lcName = name.toLowerCase();
 
-  if (/\b(demo|beta|trial version|trial edition)\b/i.test(lcName)) return true;
+  if (/\b(demo|beta|trial version|trial edition|art of|soundtrack)\b/i.test(lcName)) return true;
 
   const pid = entry.productId || '';
   const eid = entry.entitlementId || '';
@@ -210,13 +210,13 @@ function mergeLibrary(purchased, titles, played) {
   const libValues = () => Array.from(libMap.values());
 
   // **STAGE 1: PRE-FILTERING DEMOS**
-  const filteredPurchased = (purchased || []).filter(p => !isDemoGame(p));
-  const filteredTitles = (titles || []).filter(t => !isDemoGame(t));
-  const filteredPlayed = (played || []).filter(p => !isDemoGame(p));
+  const filteredPurchased = (purchased || []).filter(p => !isNonGame(p));
+  const filteredTitles = (titles || []).filter(t => !isNonGame(t));
+  const filteredPlayed = (played || []).filter(p => !isNonGame(p));
 
-  console.log(`[FILTER STATS] Removed ${purchased.length - filteredPurchased.length} Purchased Demos.`);
-  console.log(`[FILTER STATS] Removed ${titles.length - filteredTitles.length} Titles Demos.`);
-  console.log(`[FILTER STATS] Removed ${played.length - filteredPlayed.length} Played Demos.`);
+  console.log(`[FILTER STATS] Removed ${purchased.length - filteredPurchased.length} Purchased Non-games.`);
+  console.log(`[FILTER STATS] Removed ${titles.length - filteredTitles.length} Titles Non-games.`);
+  console.log(`[FILTER STATS] Removed ${played.length - filteredPlayed.length} Played Non-games.`);
 
   // Step 1: purchased (Sets the reliable foundation)
   filteredPurchased.forEach(p => {
