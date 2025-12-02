@@ -94,112 +94,9 @@ const OUTPUT_HTML = path.join(__dirname, 'full_library_images.html');
 <meta charset="utf-8">
 <title>PSN Library Covers</title>
 
-<style>
-  body {
-    font-family: sans-serif;
-    background: #1b1b1b;
-    color: #fff;
-    margin: 0;
-    padding: 20px;
-  }
+<!-- Link to external stylesheet -->
+<link rel="stylesheet" href="style.css">
 
-  h2 {
-    margin-top: 0;
-  }
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-  }
-
-  .toolbar input {
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid #444;
-    background: #2a2a2a;
-    color: #fff;
-    width: 220px;
-  }
-
-  .toolbar select,
-  .toolbar button {
-    background: #333;
-    color: #fff;
-    border: 1px solid #555;
-    padding: 8px 14px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
-  .toolbar button.active {
-    background: #4c8bf5;
-    border-color: #4c8bf5;
-  }
-
-  .library-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-  }
-
-  .group-title {
-    width: 100%;
-    margin: 30px 0 10px;
-    font-size: 20px;
-    font-weight: bold;
-    opacity: 0.85;
-    border-bottom: 1px solid #444;
-    padding-bottom: 4px;
-  }
-
-  .game-card {
-    width: 150px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .game-card:hover {
-    transform: scale(1.06);
-    box-shadow: 0 0 10px #000a;
-  }
-
-  .capsule,
-  .widecapsule {
-    background: #2c2c2c;
-    border-radius: 6px;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .capsule {
-    width: 150px;
-    height: 225px;
-  }
-
-  .widecapsule {
-    width: 300px;
-    height: 150px;
-  }
-
-  .capsule img,
-  .widecapsule img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  /* Hidden wide view by default */
-  .widecapsule {
-    display: none;
-  }
-</style>
 </head>
 <body>
 
@@ -226,108 +123,12 @@ const OUTPUT_HTML = path.join(__dirname, 'full_library_images.html');
 <div id="libraryContainer"></div>
 
 <script>
+  // ONLY the JSON embedding line remains here for Node.js interpolation
   const rawData = ${JSON.stringify(libraryWithImages)};
-  
-  let currentView = "capsule";
-  let currentSort = "az";
-  let currentGroup = "none";
-  let searchTerm = "";
-
-  function render() {
-    let data = [...rawData];
-
-    // -------- FILTER --------
-    if (searchTerm.trim() !== "") {
-      const term = searchTerm.toLowerCase();
-      data = data.filter(g =>
-        g.name.toLowerCase().includes(term) ||
-        g.platform?.toLowerCase().includes(term)
-      );
-    }
-
-    // -------- SORT --------
-    if (currentSort === "az") {
-      data.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (currentSort === "za") {
-      data.sort((a, b) => b.name.localeCompare(a.name));
-    } else if (currentSort === "platform") {
-      data.sort((a, b) =>
-        (a.platform || "").localeCompare(b.platform || "") ||
-        a.name.localeCompare(b.name)
-      );
-    }
-
-    // -------- GROUP --------
-    let html = "";
-
-    if (currentGroup === "platform") {
-      const groups = {};
-      for (const g of data) {
-        const key = g.platform || "Unknown";
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(g);
-      }
-
-      for (const platform of Object.keys(groups).sort()) {
-        html += \`<div class="group-title">\${platform}</div>\`;
-        html += renderCards(groups[platform]);
-      }
-
-    } else {
-      html = renderCards(data);
-    }
-
-    document.getElementById("libraryContainer").innerHTML =
-      \`<div class="library-grid">\${html}</div>\`;
-  }
-
-  function renderCards(list) {
-    return list
-      .map(g => \`
-        <div class="game-card">
-          <div class="capsule" data-card-type="capsule" style="display:\${currentView === 'capsule' ? 'flex' : 'none'}">
-            \${g.gridUrl ? \`<img src="\${g.gridUrl}">\` : \`<span>\${g.name}</span>\`}
-          </div>
-
-          <div class="widecapsule" data-card-type="wide" style="display:\${currentView === 'wide' ? 'flex' : 'none'}">
-            \${g.wideGridUrl ? \`<img src="\${g.wideGridUrl}">\` : \`<span>\${g.name}</span>\`}
-          </div>
-        </div>
-    \`).join("");
-  }
-
-  // -------- UI HANDLERS --------
-  document.getElementById("btnCapsule").addEventListener("click", () => {
-    currentView = "capsule";
-    document.getElementById("btnCapsule").classList.add("active");
-    document.getElementById("btnWide").classList.remove("active");
-    render();
-  });
-
-  document.getElementById("btnWide").addEventListener("click", () => {
-    currentView = "wide";
-    document.getElementById("btnWide").classList.add("active");
-    document.getElementById("btnCapsule").classList.remove("active");
-    render();
-  });
-
-  document.getElementById("sortSelect").addEventListener("change", e => {
-    currentSort = e.target.value;
-    render();
-  });
-
-  document.getElementById("groupSelect").addEventListener("change", e => {
-    currentGroup = e.target.value;
-    render();
-  });
-
-  document.getElementById("searchBox").addEventListener("input", e => {
-    searchTerm = e.target.value;
-    render();
-  });
-
-  render();
 </script>
+
+<!-- Link to external JavaScript file -->
+<script src="library.js"></script>
 
 </body>
 </html>`;
