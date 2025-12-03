@@ -117,6 +117,19 @@ const OUTPUT_HTML = path.join(__dirname, 'full_library_images.html');
     <option value="platform">Group: Platform</option>
   </select>
 
+  <!-- Platform Filter Dropdown -->
+  <div class="dropdown">
+      <!-- Button to open/close the filter -->
+      <button id="platform-filter-btn" class="dropdown-toggle" aria-expanded="false" aria-controls="platform-filter-content">
+          Platforms
+      </button>
+
+      <!-- The Filter Menu container. Content will be dynamically inserted by JavaScript. -->
+      <div id="platform-filter-content" class="dropdown-content" aria-hidden="true">
+          <!-- Checkboxes will be rendered here -->
+      </div>
+  </div>
+
   <input type="text" id="searchBox" placeholder="Search…" />
 </div>
 

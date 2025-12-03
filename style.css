@@ -103,3 +103,106 @@ h2 {
 .widecapsule {
   display: none;
 }
+
+/* ------------------------------------------------------------------ */
+/* --- PLATFORM FILTER DROPDOWN STYLES (using .dropdown-content) --- */
+/* ------------------------------------------------------------------ */
+
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Style for the button that toggles the dropdown */
+.dropdown-toggle {
+    background-color: #333; /* Dark background */
+    color: #fff; /* White text */
+    padding: 10px 15px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.2s, box-shadow 0.2s;
+    min-width: 12rem;
+    /* Add a small arrow to signify a dropdown */
+    position: relative;
+    padding-right: 30px; /* Space for the caret */
+}
+
+.dropdown-toggle:hover {
+    background-color: #444;
+}
+
+.dropdown-toggle::after {
+    content: '▼'; /* Down arrow caret */
+    font-size: 0.7em;
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: transform 0.2s;
+}
+
+.dropdown-toggle[aria-expanded="true"]::after {
+    transform: translateY(-50%) rotate(180deg); /* Arrow points up when open */
+}
+
+/* Styling the Floating Menu Container (now .dropdown-content) */
+.dropdown-content {
+    display: none; /* Initially hidden */
+    position: absolute;
+    top: calc(100% + 5px); 
+    /* Align to the right edge of the button */
+    right: 0; 
+    z-index: 100; 
+    
+    background-color: #2a2a2a;
+    min-width: 250px;
+    max-height: 350px;
+    overflow-y: auto;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 5px 0;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.7);
+}
+
+.dropdown-content.show {
+    display: block; 
+}
+
+/* Styling the Checkbox Rows */
+.dropdown-content label {
+    display: flex;
+    align-items: center;
+    padding: 8px 15px; 
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.95rem;
+    color: #ddd; 
+    user-select: none;
+}
+
+.dropdown-content label:hover {
+    background-color: #383838;
+}
+
+/* --- CRITICAL CHECKBOX SIZE FIX --- */
+/* Overrides aggressive general input styling to make checkboxes standard size */
+.dropdown-content input[type="checkbox"] {
+    width: 16px !important; 
+    height: 16px !important;
+    min-height: 16px !important;
+    padding: 0 !important; 
+    
+    /* Ensure appearance is checkbox type */
+    appearance: checkbox !important;
+    -webkit-appearance: checkbox !important;
+    
+    box-sizing: border-box !important;
+    margin-right: 10px !important;
+    flex-shrink: 0; 
+    border-radius: 3px;
+    border: 1px solid #777;
+    background-color: #eee;
+}
