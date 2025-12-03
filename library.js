@@ -2,13 +2,14 @@ let currentView = "capsule";
 let currentSort = "az";
 let currentGroup = "none";
 let searchTerm = "";
+let currentPlatforms = "all"
 
 function render() {
   // rawData is defined in the inline <script> tag in the HTML and should be available globally
   // We use the spread operator to create a mutable copy for sorting/filtering
   let data = [...rawData];
 
-  // -------- FILTER --------
+  // -------- SEARCH FILTER --------
   if (searchTerm.trim() !== "") {
     const term = searchTerm.toLowerCase();
     data = data.filter(g =>
@@ -17,11 +18,41 @@ function render() {
     );
   }
 
+  // --- PLATFORM FILTER (Corrected Block for ALL/NONE/SOME) ---
+  if (currentPlatforms !== "all") {
+      
+      const selectedKeys = Array.isArray(currentPlatforms) ? currentPlatforms : [];
+      
+      if (selectedKeys.length === 0) {
+          // FIX: If the selected array is empty (Platforms: None), hide all games.
+          data = []; 
+      } else {
+          // Case: Specific platforms selected (non-empty array).
+          const selectedPlatformsSet = new Set(selectedKeys);
+          
+          data = data.filter(g => {
+              const gamePlatform = g.platform;
+              
+              if (!gamePlatform) {
+                  return false; 
+              }
+              
+              // Split the comma-separated platform string (e.g., "PS5,PSPC") 
+              const platformsOnGame = gamePlatform.split(',').map(p => p.trim());
+              
+              // Keep the game if ANY of its platforms are selected.
+              return platformsOnGame.some(p => selectedPlatformsSet.has(p));
+          });
+      }
+  }
+  // -----------------------------------
+
+
   // -------- SORT --------
   if (currentSort === "az") {
     data.sort((a, b) => a.name.localeCompare(b.name));
   } else if (currentSort === "za") {
-    data.sort((a, b) => b.name.localeCompare(a.name));
+    data.sort((a, b) => b.name.localeCompare(b.name));
   } else if (currentSort === "platform") {
     // Sort by platform first, then by name
     data.sort((a, b) =>
@@ -43,7 +74,7 @@ function render() {
 
     // Iterate through sorted platforms (keys) to maintain order
     for (const platform of Object.keys(groups).sort()) {
-      html += `<div class="group-title">${platform}</div>`;
+      html += `<div class="group-title">${platform} (${groups[platform].length})</div>`;
       html += renderCards(groups[platform]);
     }
 
@@ -102,20 +133,28 @@ document.getElementById("groupSelect").addEventListener("change", e => {
 });
 
 document.getElementById("searchBox").addEventListener("input", e => {
-  // Wait a moment after input stops before rendering for better performance
-  // (though immediate rendering is fine for small datasets)
   searchTerm = e.target.value;
   render();
+});
+
+// --- PLATFORM FILTER LISTENER ---
+document.getElementById("platform-filter-content").addEventListener("change", e => {
+    if (e.target.type === 'checkbox') {
+        const dropdownScript = document.querySelector('script').getPlatformFunctions();
+        
+        // This function updates the global 'currentPlatforms' state
+        dropdownScript.updateFilterDisplay();
+        
+        // Trigger a full re-render based on the new state
+        render();
+    }
 });
 
 
 //dropddown bs
 /**
  * Platform Filter Dropdown Logic
- * * This script initializes a dropdown filter using a hardcoded mapping 
- * between user-facing display names and internal platform keys.
- * It must be placed in a file or script block that runs after the DOM elements 
- * with IDs 'platform-filter-btn' and 'platform-filter-content' have been loaded.
+ * This script initializes and controls the behavior of the platform filter dropdown.
  */
 document.addEventListener('DOMContentLoaded', () => {
     const toggleButton = document.getElementById('platform-filter-btn');
@@ -124,7 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // ====================================================================
     // >>> PLATFORM MAPPING DATA <<<
     // Maps display names to internal data keys for filtering.
-    // Display Name (for UI) -> Key (for database/data filtering)
     // ====================================================================
     const PLATFORM_MAPPING = [
         { display: "PC", key: "PSPC" },
@@ -133,43 +171,73 @@ document.addEventListener('DOMContentLoaded', () => {
         { display: "PS3", key: "PS3" },
         { display: "Vita", key: "PSVITA" },
     ];
+    
+    // Total count of individual platforms (excluding the 'All' checkbox)
+    const totalPlatformsCount = PLATFORM_MAPPING.length;
 
 
     if (toggleButton && dropdownContent) {
         
         /**
          * Returns an array of the internal keys (the filter values) for all currently checked items.
-         * This array should be used to filter your main dataset.
-         * @returns {string[]} Array of internal platform keys (e.g., ["PSPC", "PSVITA"])
          */
         function getSelectedPlatforms() {
-            // Select all checked boxes
-            const checked = dropdownContent.querySelectorAll('input[type="checkbox"]:checked');
-            // Map them to their internal key (data-key)
+            // Select all checked boxes that are NOT the 'All' checkbox
+            const checked = dropdownContent.querySelectorAll('input[type="checkbox"][data-key]:checked');
             return Array.from(checked).map(cb => cb.dataset.key); 
         }
 
         /**
-         * Updates the display text of the filter button based on current selections.
+         * Updates the display text of the filter button and updates the global 'currentPlatforms'.
          */
         function updateFilterDisplay() {
-            const checked = dropdownContent.querySelectorAll('input[type="checkbox"]:checked');
-            const selectedCount = checked.length;
+            const selectedKeys = getSelectedPlatforms();
+            const selectedCount = selectedKeys.length;
             
-            // If zero are checked, or all available are checked, display "All"
-            if (selectedCount === 0 || selectedCount === PLATFORM_MAPPING.length) {
+            const allCheckbox = dropdownContent.querySelector('input[data-all-toggle]');
+            
+            // 1. Update the state of the 'All' checkbox
+            if (allCheckbox) {
+                // If 0 or N platforms are checked, the 'All' box state needs to be updated.
+                // We only check 'All' if the count matches the total number of platforms.
+                allCheckbox.checked = selectedCount === totalPlatformsCount;
+            }
+            
+            // 2. Update the button text & global state
+            if (selectedCount === 0) {
+                // Case: None selected.
+                toggleButton.textContent = 'Platforms: None';
+                currentPlatforms = []; 
+            } else if (selectedCount === totalPlatformsCount) {
+                // Case: All selected.
                 toggleButton.textContent = 'Platforms: All';
+                currentPlatforms = 'all'; 
             } else {
-                // Collect the user-friendly display names for the button text
-                const selectedDisplayNames = Array.from(checked).map(cb => cb.dataset.display);
+                // Case: Some selected (1 to N-1).
+                const selectedDisplayNames = Array.from(dropdownContent.querySelectorAll('input[type="checkbox"][data-key]:checked')).map(cb => cb.dataset.display);
                 
-                // Display up to 3 names, otherwise show a count
                 if (selectedDisplayNames.length <= 3) {
                     toggleButton.textContent = `Platforms: ${selectedDisplayNames.join(', ')}`;
                 } else {
                     toggleButton.textContent = `Platforms: ${selectedDisplayNames.length} selected`;
                 }
+                currentPlatforms = selectedKeys; // Set global to the array of selected keys
             }
+        }
+        
+        /**
+         * Handles the click on the 'All' checkbox, checking or unchecking all other boxes.
+         */
+        function handleAllToggle(isChecked) {
+            const platformCheckboxes = dropdownContent.querySelectorAll('input[type="checkbox"][data-key]');
+            
+            platformCheckboxes.forEach(cb => {
+                cb.checked = isChecked;
+            });
+            
+            // Explicitly call update/render to ensure immediate state change and UI refresh
+            updateFilterDisplay();
+            render();
         }
 
         /**
@@ -179,18 +247,34 @@ document.addEventListener('DOMContentLoaded', () => {
             dropdownContent.innerHTML = ''; // Clear previous content
 
             const fragment = document.createDocumentFragment();
+            
+            // --- 1. Add 'All' Checkbox ---
+            const allLabel = document.createElement('label');
+            allLabel.classList.add('dropdown-all-option');
+            
+            const allCheckbox = document.createElement('input');
+            allCheckbox.type = 'checkbox';
+            allCheckbox.checked = true; // Default to checked
+            allCheckbox.dataset.allToggle = 'true'; // Marker for the 'All' box
+            allCheckbox.addEventListener('change', (event) => {
+                handleAllToggle(event.target.checked);
+            });
 
+            allLabel.appendChild(allCheckbox);
+            allLabel.appendChild(document.createTextNode(` All Platforms`));
+            fragment.appendChild(allLabel);
+            fragment.appendChild(document.createElement('hr'));
+
+            // --- 2. Add Individual Platform Checkboxes ---
             platforms.forEach(platform => {
                 const label = document.createElement('label');
                 
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                // Store BOTH the filter key and the display name
                 checkbox.dataset.key = platform.key; 
                 checkbox.dataset.display = platform.display;
                 
-                // Set all platforms to be checked by default for "Platforms: All" behavior
-                checkbox.checked = true;
+                checkbox.checked = true; // All are checked by default
 
                 label.appendChild(checkbox);
                 label.appendChild(document.createTextNode(` ${platform.display}`));
@@ -200,19 +284,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             dropdownContent.appendChild(fragment);
             
-            // Add a single listener to the container to detect changes on any checkbox
-            dropdownContent.addEventListener('change', (event) => {
-                if (event.target.type === 'checkbox') {
-                    updateFilterDisplay();
-                    
-                    // --- INTEGRATION POINT: CALL YOUR DATA FILTERING FUNCTION HERE ---
-                    // Example usage: 
-                    // filterMainData(getSelectedPlatforms());
-                    console.log("Checkbox changed. New filter keys:", getSelectedPlatforms());
-                }
-            });
-            
-            // Initialize display text after rendering
             updateFilterDisplay();
         }
         
@@ -222,7 +293,6 @@ document.addEventListener('DOMContentLoaded', () => {
         function toggleDropdown() {
             const isExpanded = toggleButton.getAttribute('aria-expanded') === 'true';
             
-            // This assumes you have a CSS class 'show' (or similar) to make the dropdown visible
             dropdownContent.classList.toggle('show'); 
             
             toggleButton.setAttribute('aria-expanded', String(!isExpanded));
@@ -230,32 +300,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // --- Initialization ---
-
-        // 1. Load and render the platforms using the hardcoded mapping
         renderPlatformCheckboxes(PLATFORM_MAPPING);
 
-        // 2. Listener for the button click (toggle)
         toggleButton.addEventListener('click', (event) => {
             event.stopPropagation();
             toggleDropdown();
         });
 
-        // 3. Listener for closing the dropdown when clicking anywhere else on the page
         document.addEventListener('click', (event) => {
             if (dropdownContent.classList.contains('show') && 
                 !dropdownContent.contains(event.target) && 
                 event.target !== toggleButton) {
                 
-                // Close the dropdown
                 dropdownContent.classList.remove('show');
                 toggleButton.setAttribute('aria-expanded', 'false');
                 dropdownContent.setAttribute('aria-hidden', 'true');
             }
         });
         
-        // 4. Prevent the dropdown from closing when clicking inside it 
         dropdownContent.addEventListener('click', (event) => {
             event.stopPropagation();
+        });
+        
+        // --- Expose necessary functions globally for the UI Handler section ---
+        document.querySelector('script').getPlatformFunctions = () => ({
+            getSelectedPlatforms: getSelectedPlatforms,
+            updateFilterDisplay: updateFilterDisplay,
         });
     } else {
         console.error("Platform filter elements not found. Ensure the HTML contains elements with IDs 'platform-filter-btn' and 'platform-filter-content'.");
@@ -263,15 +333,5 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-
-
-
-
-
-
-
-
-
 // Initial render call to display the library on page load
-// This assumes 'rawData' is available when this script executes.
 window.onload = render;
